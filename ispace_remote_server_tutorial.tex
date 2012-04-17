@@ -1,0 +1,574 @@
+%\documentclass[14pt]{extarticle}
+\documentclass[11pt]{article}
+\usepackage{natbib}
+\usepackage[dvipdfm,colorlinks=true,urlcolor=DarkBlue,linkcolor=DarkBlue,bookmarks=false,citecolor=DarkBlue]{hyperref}
+
+\usepackage[pdftex]{graphicx}
+\usepackage{fancyhdr}
+\usepackage[T1]{fontenc}
+\usepackage{palatino}
+\usepackage[utf8]{inputenc}
+%\usepackage[super]{nth}
+\usepackage{setspace}
+\usepackage{placeins}
+\usepackage{subfigure}
+\usepackage{multirow}
+\usepackage{rotating}
+\usepackage{marvosym}  % Used for euro symbols with \EUR
+\newcommand{\HRule}{\rule{\linewidth}{0.5mm}}
+\usepackage{longtable} %% Allows the use of the longtable format produced by xl2latex.rb
+\usepackage{lscape} %% Allows landscape orientation of tables
+\usepackage{appendix} %% Allows customization of the appendix properties
+\setcounter{tocdepth}{1} %% Restricts the table of contents to the section header level entries only
+
+\usepackage{geometry}
+\geometry{letterpaper}
+\usepackage{amsmath}
+\usepackage[stable]{footmisc}
+
+%% The following settings are for the listings environment in R
+\usepackage{listings}
+\usepackage[svgnames]{xcolor}
+\usepackage{soul}
+\sethlcolor{LightGoldenrodYellow}
+\lstset{backgroundcolor=\color{LightYellow}}
+\lstset{framextopmargin=6pt, framexbottommargin=6pt, framerule=4pt,
+  rulecolor=\color{White}, showspaces=false, showstringspaces=false}
+
+\title{Remote access and processing of PATSTAT data}
+\author{Mark Huberty\thanks{Travers Department of Political Science,
+    University of California, Berkeley. Contact:
+    \url{markhuberty@berkeley.edu}.}}
+\date{\today}
+
+\graphicspath{{../figures/}}
+
+\begin{document}
+%\input{/Users/markhuberty/Documents/Technology/Documentation/Typesetting/prospectusTitle.tex}
+\maketitle
+\doublespacing
+
+\section{Introduction}
+\label{sec:introduction}
+
+This document provides background on how to access the PATSTAT
+database as hosted at \texttt{durkheim.berkeley.edu}, use R and python
+to query and process data, and move results back to your local machine
+for analysis and use. It assumes that any access to \texttt{durkheim}
+will occur via the command line, or via implicit remote connections
+through a locally-invoked version of R, python, or MATLAB. 
+
+All code for this session is hosted at \texttt{github}. See
+\url{https://github.com/markhuberty/durkheim_mysql_remote} for more
+detail. 
+
+
+\section{Tools}
+\label{sec:tools}
+
+Remote access will require several tools. For the purposes of this
+document, we assume you are using the following:
+
+
+\begin{itemize}
+\item Remote access
+  \begin{itemize}
+  \item Windows 
+
+    Windows users need to install separate programs for
+    remote
+    access. PuTTY\footnote{\url{http://www.chiark.greenend.org.uk/~sgtatham/putty/}}
+    is the default client and works well for most people. You should
+    have both the SSH (remote shell access) and SCP (remote copy)
+    pieces installed.
+  \item OS X 
+
+    OS X users have access to the SSH and SCP clients via the Terminal
+    application found under \texttt{Applications/Utilities}.
+  \item Linux 
+
+    Linux users should have the SSH client installed by
+    default and available inside their distribution's terminal emulator.
+  \end{itemize}
+\item Python
+
+Python access to the database should occur using the \texttt{MySQLdb}
+module\footnote{\url{http://mysql-python.sourceforge.net/}}. That is
+installed on the server and can be called via \texttt{import MySQLdb}
+or a suitable variant.
+\item R
+
+R access to the database is most easily had through the
+\texttt{RMySQL}
+interface\footnote{\url{http://cran.r-project.org/web/packages/RMySQL/index.html}},
+available through CRAN.
+\item MATLAB
+
+Matlab access to MySQL and other databases is supported via the
+\texttt{database}
+routines\footnote{\url{http://www.mathworks.com/help/toolbox/database/ug/database.html}}. 
+\end{itemize}
+
+\section{Remote or local sessions?}
+\label{sec:remote-or-local}
+
+Database access can occur through either a remote or a local
+session. ``Remote'' here means that the R or python process is running
+on \texttt{durkheim} itself, so that the connection to the database
+occurs from a process on the server to the server database. ``Local''
+means that the R, python, or MATLAB process is running on a user's
+local machine, which accesses \texttt{durkheim} solely for the
+purpose of connecting to the database, executing the database query,
+and pulling the data back into the user's local session. 
+
+``\textbf{Local}'' access has clear advantages for ease of use. However, users
+who want to do this should recognize that there are also downsides:
+\begin{itemize}
+\item If the network connection is unstable, it might die mid-query,
+  taking the query and any output with it. This is particularly
+  problematic for querying large databases like PATSTAT, where
+  execution times might be minutes or tens of minutes
+\item If the output is large, there will
+  be a long delay as the output is pulled back through the network
+  connection. So, for instance, a 1 Mb/s connection (a FAST
+  connection) will take 1.5 minutes to pull back 100mb of output.
+\end{itemize}
+We recommend that users wishing to run local sessions connect to the
+database via an SSH tunnel, which is more secure and easier for the
+server administrator to manage. More information on tunnelling is
+provided in each section below.
+
+
+``\textbf{Remote}'' connections can work in one of three ways:
+\begin{enumerate}
+\item Log into the server and run an interactive session in R or
+  python, pushing code stored on the server to an R or python session
+  running on the server
+\item Log into the server but run local code on the remote
+  server. Note that this is distinct from the ``local'' option above:
+  though the code is local, the R or python process is on the remote
+  box, so there's no need to suck large amounts of data over a network connection
+\item Log into the server and run code as a batch process, in which a
+  script executes beginning-to-end without user interaction. 
+\end{enumerate}
+
+Note that option (2) really only works for R, via either R Studio's
+remote server protocols or Emacs' \texttt{ess-remote}
+mode.\footnote{ipython html notebook might be an answer here...}
+
+
+\section{Example R sessions}
+\label{sec:sample-r-session}
+
+\subsection{Interactive remote R session, remote code}
+\label{sec:remote-r-session-1}
+
+Emacs and ESS provide a full-featured remote suite for writing and
+executing R code on the server. The steps are:
+\begin{enumerate}
+\item Log into \texttt{durkheim} via ssh
+\item Open the desired R code file in Emacs (\texttt{emacs mycode.R})
+\item Split the buffer (\texttt{C-x 3})
+\item Start the R session in the new buffer (\texttt{M-x R})
+\end{enumerate}
+A sample result is shown in figure
+\ref{fig:sample-emacs-r-remote}. You will now be able to send code
+from the R code file to the R shell using standard Emacs codebindings. All
+saved output (figures and data) are written to the remote filesystem,
+not the local computer. The syntax for issuing database queries is
+shown in section \ref{sec:database-querying-r}
+
+\subsection{Interactive remote R session, local code with \texttt{ess-remote}}
+\label{sec:remote-r-session}
+
+For running an interactive remote session from code local to your
+personal machine, Emacs provides the \texttt{ess-remote} function. The
+steps to run this go like this:
+
+\begin{enumerate}
+\item Open the desired code file in emacs on your local machine
+\item Split the buffer as desired (e.g, \texttt{C-x 3} for
+  side-by-side buffers)
+\item In the new buffer, invoke an emacs-shell (\texttt{M-x shell})
+\item From the shell, log into the server and start R from the comamnd
+  line, as in:\footnote{http://www.r-bloggers.com/run-a-remote-r-session-in-emacs-emacs-ess-r-ssh/}
+\begin{verbatim}
+$ ssh username@durkheim.berkeley.edu
+Welcome to Linux durkheim 2.6.32-37-generic 
+#81-Ubuntu SMP Fri Dec 2 20:32:42 UTC 2011 x86_64 GNU/Linux
+Ubuntu 10.04.1 LTS
+
+Welcome to Ubuntu!
+ * Documentation:  https://help.ubuntu.com/
+
+77 packages can be updated.
+76 updates are security updates.
+
+Last login: Mon Apr 16 14:26:33 2012 
+from airbears-136-152-132-25.airbears.berkeley.edu
+username@durkheim:~/ R
+R version 2.13.0 (2011-04-13)
+Copyright (C) 2011 The R Foundation for Statistical Computing
+ISBN 3-900051-07-0
+Platform: x86_64-unknown-linux-gnu (64-bit)
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+  Natural language support but running in an English locale
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+> 
+\end{verbatim}
+\item Attach the remote R session to your local \texttt{ess} process
+  (\texttt{M-x ess-remote})
+\end{enumerate}
+
+You should now be able to push code from your local file to the remote
+R process with the standard ESS keybindings. Figure
+\ref{fig:sample-emacs-r-remote} shows that this looks no different
+from running in a local R session. Note, though, that any
+\textit{saved} output (figures, data, etc) will be written to the
+filesystem on the remote server. The syntax for issuing database
+queries is shown in section \ref{sec:database-querying-r}. 
+
+\subsection{Interactive local R session, remote database connection}
+\label{sec:interactive-local-r}
+
+Users who don't want to use Emacs and still want an interactive R
+session may use whichever R interface they desire, and connect to
+\texttt{durkheim} solely for interacting with the database. This
+should be done through a
+tunnelled SSH connection. This occurs in two steps: creating the
+tunnel, and running the db connection in R.
+
+
+To create the tunnel, log into \texttt{durkheim.berkeley.edu} using
+an SSH client as follows:
+
+\begin{verbatim}
+ssh -L 3306:localhost:3306 username@durkheim.berkeley.edu
+\end{verbatim}
+
+This is doing three things:
+\begin{enumerate}
+\item Establishing an open SSH connection to the server
+\item Forwarding port 3306 (which mysql listens on) through that connection
+\item Mapping that port to localhost, the implicit address of the
+  local machine
+\end{enumerate}
+
+Users can then issue calls to the database from within a local R
+session as follows:
+
+\begin{lstlisting}[language=r, numbers=none, frame=single]
+  library(DBI)
+  username = "markhuberty"
+  password = "***"
+  db = "patstatOct2011"
+
+  my.query = "SELECT count(*) FROM tls206_person 
+              WHERE person_ctry_code=="US""
+  
+  ## Establish the connection
+  conn = dbConnect("MySQL",
+                   username=username,
+                   password=password,
+                   dbname=db,
+                   host="127.0.0.1",
+                   port=3306
+                   )
+  ## Pass the query to the db 
+  query = dbSendQuery(conn, my.query)
+  
+  ## Note that -1 fetches all records. Set it to a 
+  ## 0 < N < infinity to fetch N rows.
+  output = fetch(query, -1)
+
+  dbDisconnect(conn)
+\end{lstlisting}
+
+\subsection{Running R code in batch }
+\label{sec:running-r-code}
+
+You can also run R code on the server in batch mode. Here, you provide
+a complete R script that runs and saves output to one or more files,
+and run the entire script at once. Given that scripts may take some
+time to execute, it's important to do this such that you can log out
+(or the connection can die) without stopping the batch process. 
+
+The steps to do so go as follows:
+\begin{enumerate}
+\item Log into \texttt{durkheim} with \texttt{ssh}
+\item Execute your script with this syntax: 
+\begin{verbatim}
+nohup R CMD BATCH mycode.R &
+\end{verbatim}
+\item Wait for the script to finish and write output to the files you indicated
+\end{enumerate}
+
+Here, \texttt{nohup} provides a ``no hangup'' signal to the shell, so
+that it does not stop the batch process when you log out. \texttt{R
+  CMD BATCH mycode.R} executes the code in batch mode. Finally,
+\texttt{\&} pushes the process to the background and returns control
+of the shell to the user. Any status, print, or error messages are
+written to a \texttt{nohup.out} file. 
+
+\subsection{Database querying in R}
+\label{sec:database-querying-r}
+
+Querying a database in R is straightforward when using the
+\texttt{DBI} package, available from CRAN. The code segment below
+shows how this can be done easily: 
+
+\begin{lstlisting}[language=r, numbers=none, frame=single]
+  library(DBI)
+  username = "markhuberty"
+  password = "***"
+  db = "patstatOct2011"
+
+  my.query = "SELECT count(*) FROM tls206_person 
+              WHERE person_ctry_code=="US""
+  
+  ## Establish the connection
+  conn = dbConnect("MySQL",
+                   username=username,
+                   password=password,
+                   dbname=db
+                   )
+  ## Pass the query to the db 
+  query = dbSendQuery(conn, my.query)
+  
+  ## Note that -1 fetches all records. Set it to a 
+  ## 0 < N < infinity to fetch N rows.
+  output = fetch(query, -1)
+
+  dbDisconnect(conn)
+\end{lstlisting}
+\label{lst:db-query-r}
+
+\begin{landscape}
+  \begin{figure}[ht]
+    \centering
+    \includegraphics[height=0.75\textwidth]{sample_emacs_ess_remote_session}
+    \caption{A remote R session running from local code via
+      \texttt{ess-remote}. The user's code is on their local machine,
+      but the R session is running inside an ssh connection to
+      \texttt{durkheim}, via ess-remote. Code can be sent from the code buffer to the
+      ESS shell via standard Emacs ess-mode keybindings. }
+    \label{fig:sample-emacs-r-remote}
+  \end{figure}
+\end{landscape}
+
+
+\begin{landscape}
+  \begin{figure}[ht]
+    \centering
+    \includegraphics[height=0.75\textwidth]{sample_emacs_r_session}
+    \caption{A remote R session running with remote code and a remote
+      shell.. The user is logged in to
+      \texttt{durkheim}. The left-hand buffer is an R code file
+      open in Emacs. The right-hand buffer is an interactice ESS shell. Code can be sent from the code buffer to the
+      ESS shell via standard Emacs ess-mode keybindings. }
+    \label{fig:sample-emacs-r-remote}
+  \end{figure}
+\end{landscape}
+
+
+\section{A sample Python session}
+
+\subsection{Local interactive sessions in python}
+\label{sec:local-inter-sess}
+
+You can run a local python session and only connect to the server for
+the purposes of issuing database queries and receiving output. The
+easiest way to do this is via a \texttt{ssh} tunnel. This is easily
+done via any SSH client, including PuTTY. 
+
+From the client window, log into \texttt{durkheim.berkeley.edu} as
+follows:
+
+\begin{verbatim}
+ssh -L 3306:localhost:3306 username@durkheim.berkeley.edu
+\end{verbatim}
+
+This is doing three things:
+\begin{enumerate}
+\item Establishing an open SSH connection to the server
+\item Forwarding port 3306 (which mysql listens on) through that connection
+\item Mapping that port to localhost, the implicit address of the
+  local machine
+\end{enumerate}
+
+Basically, this means that when python goes looking for mysql, it
+looks for it over the server connection rather than on the local
+machine. For more information on port forwarding for MySQL on Windows,
+see \url{http://www.codemastershawn.com/library/tutorial/ssh.tunnel.php}.
+
+Once this is done, fire up python and import \texttt{MySQLdb}. The
+syntax for issuing a query looks like this:
+
+\begin{lstlisting}[language=python]
+  import MySQLdb
+  
+  my_query = "SELECT count(*) FROM tls206_person 
+              WHERE person_ctry_code=="US""
+  
+  ## Establish the db connection
+  ## Note here: if you are running remote code in a remote
+  ## python session, host="localhost" is correct. Otherwise,
+  ## host="" is required so that the code goes looking for the right
+  ## remote connection
+  conn = MySQLdb.connect(host="127.0.0.1",
+                         user="markhuberty" ,
+                         passwd="***",
+                         db="patstatOct2011"
+                         )
+
+  conn_cursor = conn.cursor()
+
+  ## Execute the query
+  conn_cursor.execute(my_query)
+
+  ## Collect the output
+  output = conn_cursor.fetchall()
+  ## Shut down the 
+  conn_cursor.close()
+  conn.close()  
+\end{lstlisting}
+
+\subsection{Remote interactive sessions in python}
+\label{sec:remote-inter-sess}
+
+Unlike R, python lacks a simple mechanism for sending local code to a
+python session on a remote server. This leaves only the remote/remote
+option. The iPython HTML Notebook functionality may provide a way
+around this, but is less useful for data-intensive operations
+
+\subsubsection{Remote code and remote python session with emacs}
+\label{sec:remote-code-remote}
+
+Emacs and iPython provide a powerful interactive data analysis
+interface and make working remotely much easier. The steps are:
+\begin{enumerate}
+\item Log into \texttt{durkheim} via ssh
+\item Open the desired Python code file in Emacs
+\item Split the buffer (\texttt{C-x 3})
+\item Start the ipython session (\texttt{C-c !})
+\end{enumerate}
+A sample result is shown in figure
+\ref{fig:sample-emacs-ipython-remote}. You will now be able to send code from the python file to the iPython
+session directly using the standard iPython keybindings. Again, all
+saved output (figures and data) are written to the remote filesystem,
+not the local computer. 
+
+\subsubsection{Local code and remote python session with ipython-notebook}
+\label{sec:local-code-remote}
+
+(Still working on this problem; ipython html notebook might be the
+best way to proceed.))
+
+
+\subsubsection{Running python code in batch}
+\label{sec:running-python-code}
+
+Like R, python scripts can be run start-to-finish without an
+interactive session. Also like R, the code must be structured to run
+without user input, and to write any desired output to files. 
+
+The process for running python code in batch is much the same as for R::
+\begin{enumerate}
+\item Push your script to your server account via either \texttt{scp}
+  or \texttt{git}
+\item Log into \texttt{durkheim} with \texttt{ssh}
+\item Execute your script with this syntax: 
+\begin{verbatim}
+nohup python mycode.py mycode.R &
+\end{verbatim}
+\item Wait for the script to finish and write output to the files you indicated
+\end{enumerate}
+
+Note that, unlike R, python will only write status and error messages
+to \texttt{nohup.out} when the entire process is complete. 
+
+\subsection{Querying the database from Python}
+\label{sec:query-datab-from}
+
+Python provides easy access to MySQL databases via the
+\texttt{MySQLdb} module, which permits querying and extraction of data
+from the database into standard Python objects. \texttt{MySQLdb}
+provides for both local and remote database connections, via a
+consistent syntax. The code below
+provides a sample syntax for doing so with PATSTAT.
+
+\begin{lstlisting}[language=python, numbers=none, frame=single]
+  import MySQLdb
+  
+  my.query = "SELECT count(*) FROM tls206_person 
+              WHERE person_ctry_code=="US""
+  
+  ## Establish the db connection
+  ## Note here: if you are running remote code in a remote
+  ## python session, host="localhost" is correct. Otherwise,
+  ## host="" is required so that the code goes looking for the right
+  ## remote connection
+  conn = MySQLdb.connect(host="localhost",
+                         user="markhuberty" ,
+                         passwd="***",
+                         db="patstatOct2011"
+                         )
+
+  conn_cursor = conn.cursor()
+
+  ## Execute the query
+  conn_cursor.execute(my.query)
+
+  ## Collect the output
+  output = conn_cursor.fetchall()
+  ## Shut down the 
+  conn_cursor.close()
+  conn.close()
+\end{lstlisting}
+
+
+\begin{landscape}
+  \begin{figure}[ht]
+    \centering
+    \includegraphics[height=0.75\textwidth]{sample_emacs_ipython_session}
+    \caption{A remote python session. The user is logged in to
+      \texttt{durkheim}. The left-hand buffer is a python code file
+      open in Emacs. The right-hand buffer is a \texttt{ipython}
+      interactive shell. Code can be sent from the code buffer to the
+      python shell via standard Emacs python-mode keybindings. }
+    \label{fig:sample-emacs-ipython-remote}
+  \end{figure}
+\end{landscape}
+
+
+\section{A sample MATLAB session}
+\label{sec:sample-matl-sess}
+
+\begin{center}
+  NOTE: the author is not a MATLAB user and has no MATLAB install to
+  test this against. Caveat emptor, RTFM, etc. 
+\end{center}
+
+\begin{lstlisting}[language=matlab, numbers=none, frame=single]
+
+conn = database('test_db','markhuberty','***','Vendor','MySQL',...
+          'Server','durkheim.berkeley.edu')
+
+query = exec(conn, my.query)
+output = fetch(query, -1)
+\end{lstlisting}
+
+
+\end{document}
